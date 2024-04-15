@@ -1,0 +1,10 @@
+apiVersion: v2
+name: dataflow-studio-chart
+description: A Helm Chart for Dataflow Studio. 
+type: application
+appVersion: "0.1.0"
+version: "0.1.0"
+dependencies:
+    - name: jupyterhub
+      version: 3.1.0
+      repository: "https://hub.jupyter.org/helm-chart/"

@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+    name: ui-config
+data:
+    dataflow.cfg : |
+        [database]
+        database_url = {{ .Values.uiConfig.db_url }}
+        echo = true
+        pool_size = 5
+        max_overflow = 10
+        
+        [server]
+        reload = True
+        host = 0.0.0.0
+        port = 8000
