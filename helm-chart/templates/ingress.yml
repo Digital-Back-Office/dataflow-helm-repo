@@ -6,13 +6,13 @@ metadata:
     acme.cert-manager.io/http01-edit-in-place: "true"
     cert-manager.io/cluster-issuer: "letsencrypt-prod"
     kubernetes.io/ingress.class: "nginx"
-    nginx.org/server-snippets: |
-      location  ~ ^/(assets)/ {
-        rewrite ^/(assets)(.*)$ /user-redirect/proxy/8000/$1$2 permanent;
-      }
-      location   /notebook {
-        rewrite /notebook /user-redirect/lab permanent;
-      }
+    nginx.ingress.kubernetes.io/secure-backends: "true"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/websocket-services: proxy-public
+    nginx.org/websocket-services: proxy-public
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-body-size: "0"
 
 spec:
   ingressClassName: nginx
@@ -27,8 +27,7 @@ spec:
             name: proxy-public
             port:
               number: 80
-      
   tls:
   - secretName: demo-dataflow-zone-tls
     hosts:
-      - "{{ .Values.ingress.host }}"            
+      - {{ .Values.ingress.host }}

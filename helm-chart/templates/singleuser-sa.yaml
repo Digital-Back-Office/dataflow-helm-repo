@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+    name: {{ .Values.jupyterhub.singleuser.serviceAccountName }}
+    annotations:
+       {{- if eq .Values.cloud_provider "aws" }}
+       eks.amazonaws.com/role-arn: {{ .Values.aws.userServiceAccount.roleArn }}
+       {{- end }}

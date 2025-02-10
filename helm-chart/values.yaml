@@ -1,44 +1,56 @@
-ingress:
-  host: demo.dataflow.zone
-uiConfig:
-  db_url: sqlite:///data/backend.db
-
 jupyterhub:
   hub:
-    initContainers:
-      - name: git-clone-templates
-        image: alpine/git
-        args:
-          - clone
-          - --single-branch
-          - --branch=main
-          - --depth=1
-          - --
-          - https://github.com/aditya-r02/Jupyter.git
-          - /etc/jupyterhub
-        securityContext:
-          runAsUser: 0
-        volumeMounts:
-          - name: custom-templates
-            mountPath: /etc/jupyterhub
+    baseUrl: /
+    redirectToServer: false
+    shutdownOnLogout: true
     extraVolumes:
       - name: custom-templates
         emptyDir: {}
+      - name: ui-config
+        configMap:
+          name: ui-config
+      - name: profile-config
+        configMap:
+          name: profile-config
 
     extraVolumeMounts:
       - name: custom-templates
         mountPath: /etc/jupyterhub
+      - name: ui-config
+        mountPath: /dataflow/app/config/
+      - name: profile-config
+        mountPath: /usr/local/etc/jupyterhub/jupyterhub_config.d/
     #extraConfig:
     
     image:
       name: dataflowsnapshot/dataflow-hub
       tag: "latest"
+
+    services:
+      fastapi:
+        url: http://hub:8181
+        command:
+          - uvicorn
+          - app:app
+          - --port
+          - "8181"
+          - --host
+          - "0.0.0.0"
+          - --app-dir
+          - /usr/src/fastapi
+        display: false
+
+    networkPolicy:
+      ingress:
+        - ports:
+            - port: 8181
+          from:
+            - podSelector:
+                matchLabels:
+                  hub.jupyter.org/network-access-hub: "true"
     config:
-      DummyAuthenticator:
-        password: DBO@123
       JupyterHub:
-        #admin_access: true
-        authenticator_class: dummy
+        authenticator_class: dataflow_authenticator
     extraConfig: 
       templates: |
         c.JupyterHub.template_paths = ['/etc/jupyterhub/']
@@ -59,9 +71,12 @@ jupyterhub:
       annotations: {}
       ports:
         nodePort:
-      extraPorts: []
+      extraPorts:
+        - port: 8181
+          targetPort: 8181
+          name: fastapi
       loadBalancerIP:
-    baseUrl: ""
+
   proxy:
     service:
       type: NodePort
@@ -69,77 +84,328 @@ jupyterhub:
       annotations: {}
       nodePorts:
         http: 30009
-        https:
+        https: 
       disableHttpPort: false
       extraPorts:
         - name: ui
           port: 8000
           targetPort: 8000
+        - name: airflow
+          port: 8080
+          targetPort: 8080
+        - name: theiaide
+          port: 3000
+          targetPort: 3000
+        - name: dashapps
+          port: 8050
+          targetPort: 8050
+        - name:  mlflow
+          port: 5968
+          targetPort: 5968
         - name: superset
           port: 8088
           targetPort: 8088
+        - name: streamlit
+          port: 8501
+          targetPort: 8501
+      
       loadBalancerIP:
       loadBalancerSourceRanges: []
-    # chp relates to the proxy pod, which is responsible for routing traffic based
-    # on dynamic configuration sent from JupyterHub to CHP's REST API.
+    
     chp:
       image:
         name: quay.io/jupyterhub/configurable-http-proxy
-        # tag is automatically bumped to new patch versions by the
-        # watch-dependencies.yaml workflow.
-        #
-        tag: "4.6.0" # https://github.com/jupyterhub/configurable-http-proxy/tags
+        tag: "4.6.2" # https://github.com/jupyterhub/configurable-http-proxy/tags
+      
+      networkPolicy:
+        egress:
+          - to:
+              - podSelector:
+                  matchLabels:
+                    app.kubernetes.io/name: jupyterhub
+                    app.kubernetes.io/component: hub
+            ports:
+              - port: 8181
+
   singleuser:
+    serviceAccountName: singleuser-sa
     storage:
-      extraVolumes: 
+      dynamic:
+        storageAccessModes: [ReadWriteMany]
+      extraVolumes:
         - name: ui-config
           configMap:
             name: ui-config
+        - name: python-envs
+          persistentVolumeClaim:
+            claimName: py-envs-pvc
+      extraVolumeMounts:
+        - name: python-envs
+          mountPath: /dataflow/envs/
+    
     image:
       name: dataflowsnapshot/dataflow-notebook
       tag: "latest"
+
     networkTools:
       image:
         name: quay.io/jupyterhub/k8s-network-tools
         tag: "3.1.0"
-    defaultUrl: /proxy/8000
+    defaultUrl: /proxy/8000/
+    initContainers:
+      - name: init
+        image: dataflowsnapshot/dataflow-init:latest
+        volumeMounts:
+          - name: ui-config
+            mountPath: /config/ui-config
+          - name: volume-{username}
+            mountPath: /home/jovyan/
     extraContainers:
       - name: ui
-        image: dataflowsnapshot/dataflow-ui
+        image: dataflowsnapshot/dataflow-ui:latest
         ports:
           - containerPort: 8000
         volumeMounts:
+          - name: volume-{username}
+            mountPath: /home/jovyan/
           - name: ui-config
-            mountPath: /home
-      - name: superset
-        image: chaitanya305/superset
-        imagePullPolicy: Always
-        ports:
-          - containerPort: 8088
+            mountPath: /dataflow/app/config/
+          - name: python-envs
+            mountPath: /dataflow/envs/
+        lifecycle:
+          postStart:
+            exec:
+              command: ["/bin/bash", "/dataflow/scripts/post_start.sh"]
         env:
           - name: ADMIN_USERNAME
             value: admin
           - name: ADMIN_EMAIL
-            value: admin@superset.com
+            value: admin@dataflow.zone
           - name: ADMIN_PASSWORD
-            value: admin 
+            value: admin
+          - name: AWS_ACCESS_KEY_ID
+            valueFrom:
+              secretKeyRef:
+                name: aws-secrets
+                key: aws_access_key_id
+          - name: AWS_SECRET_ACCESS_KEY
+            valueFrom:
+              secretKeyRef:
+                name: aws-secrets
+                key: aws_secret_access_key
+          - name: AWS_SESSION_TOKEN
+            valueFrom:
+              secretKeyRef:
+                name: aws-secrets
+                key: aws_session_token
+        
+      - name: airflow
+        image: dataflowsnapshot/dataflow-airflow:latest
+        ports:
+          - containerPort: 8080
+        volumeMounts:
+          - name: volume-{username}
+            mountPath: /home/jovyan/
+          - name: ui-config
+            mountPath: /dataflow/app/config/
+          - name: python-envs
+            mountPath: /dataflow/envs/
+        command: [ "/bin/bash", "-c",
+          "mkdir -p /home/jovyan/airflow\n
+          rsync /airflow/* /home/jovyan/airflow/\n
+          rm /home/jovyan/airflow/airflow-webserver.pid\n
+          airflow db upgrade\n
+          airflow scheduler & airflow webserver"
+        ]
+        env:
+          - name: AWS_ACCESS_KEY_ID
+            valueFrom:
+              secretKeyRef:
+                name: aws-secrets
+                key: aws_access_key_id
+          - name: AWS_SECRET_ACCESS_KEY
+            valueFrom:
+              secretKeyRef:
+                name: aws-secrets
+                key: aws_secret_access_key
+          - name: AWS_SESSION_TOKEN
+            valueFrom:
+              secretKeyRef:
+                name: aws-secrets
+                key: aws_session_token
+
+      - name: coderserver #theiaide
+        image: dataflowsnapshot/dataflow-codeserver:latest #dataflowsnapshot/dataflow-theiaide:latest
+        ports:
+          - containerPort: 3000
+        volumeMounts:
+          - name: volume-{username}
+            mountPath: /home/jovyan/apps/
+          - name: python-envs
+            mountPath: /dataflow/envs/
+        env:
+          - name: AWS_ACCESS_KEY_ID
+            valueFrom:
+              secretKeyRef:
+                name: aws-secrets
+                key: aws_access_key_id
+          - name: AWS_SECRET_ACCESS_KEY
+            valueFrom:
+              secretKeyRef:
+                name: aws-secrets
+                key: aws_secret_access_key
+          - name: AWS_SESSION_TOKEN
+            valueFrom:
+              secretKeyRef:
+                name: aws-secrets
+                key: aws_session_token
+
+      - name: dashapps
+        image: dataflowsnapshot/dataflow-dashapp:latest
+        ports:
+          - containerPort: 8050
+        volumeMounts:
+          - name: volume-{username}
+            mountPath: /home/jovyan/
+          - name: ui-config
+            mountPath: /dataflow/app/config/
+          - name: python-envs
+            mountPath: /dataflow/envs/
+        command: ["/bin/bash","-c",
+            "python /dashapps/app.py"
+          ]
+        env:
+          - name: AWS_ACCESS_KEY_ID
+            valueFrom:
+              secretKeyRef:
+                name: aws-secrets
+                key: aws_access_key_id
+          - name: AWS_SECRET_ACCESS_KEY
+            valueFrom:
+              secretKeyRef:
+                name: aws-secrets
+                key: aws_secret_access_key
+          - name: AWS_SESSION_TOKEN
+            valueFrom:
+              secretKeyRef:
+                name: aws-secrets
+                key: aws_session_token
+        
+      - name: mlflow
+        image: dataflowsnapshot/dataflow-mlflow:latest
+        ports:
+          - containerPort: 5968
+        volumeMounts:
+          - name: volume-{username}
+            mountPath: /home/jovyan/
+          - name: ui-config
+            mountPath: /dataflow/app/config/
+          - name: python-envs
+            mountPath: /dataflow/envs/
+        env:
+          - name: AWS_ACCESS_KEY_ID
+            valueFrom:
+              secretKeyRef:
+                name: aws-secrets
+                key: aws_access_key_id
+          - name: AWS_SECRET_ACCESS_KEY
+            valueFrom:
+              secretKeyRef:
+                name: aws-secrets
+                key: aws_secret_access_key
+          - name: AWS_SESSION_TOKEN
+            valueFrom:
+              secretKeyRef:
+                name: aws-secrets
+                key: aws_session_token
+      
+      - name: superset
+        image: dataflowsnapshot/dataflow-superset:latest
+        ports:
+          - containerPort: 8088
+        volumeMounts:
+          - name: volume-{username}
+            mountPath: /home/jovyan/
+          - name: ui-config
+            mountPath: /dataflow/app/config/
+          - name: python-envs
+            mountPath: /dataflow/envs/
+        command: [
+          "/bin/bash","-c",
+          "superset init\n
+          superset db upgrade\n
+          superset run -p 8088 --reload --debugger"
+        ]
+        env:
+          - name: AWS_ACCESS_KEY_ID
+            valueFrom:
+              secretKeyRef:
+                name: aws-secrets
+                key: aws_access_key_id
+          - name: AWS_SECRET_ACCESS_KEY
+            valueFrom:
+              secretKeyRef:
+                name: aws-secrets
+                key: aws_secret_access_key
+          - name: AWS_SESSION_TOKEN
+            valueFrom:
+              secretKeyRef:
+                name: aws-secrets
+                key: aws_session_token
+
+      - name: streamlit
+        image: dataflowsnapshot/dataflow-streamlit:latest
+        ports:
+          - containerPort: 8501
+        volumeMounts:
+          - name: volume-{username}
+            mountPath: /home/jovyan/
+          - name: ui-config
+            mountPath: /dataflow/app/config/
+          - name: python-envs
+            mountPath: /dataflow/envs/
+        command: ["/bin/bash","-c",
+            "streamlit run /streamlit/app.py"
+          ]
+        env:
+          - name: AWS_ACCESS_KEY_ID
+            valueFrom:
+              secretKeyRef:
+                name: aws-secrets
+                key: aws_access_key_id
+          - name: AWS_SECRET_ACCESS_KEY
+            valueFrom:
+              secretKeyRef:
+                name: aws-secrets
+                key: aws_secret_access_key
+          - name: AWS_SESSION_TOKEN
+            valueFrom:
+              secretKeyRef:
+                name: aws-secrets
+                key: aws_session_token
+                
     lifecycleHooks:
       postStart:
         exec:
-          command:  ["mkdir", "-p", "/home/jovyan/airflow/dags", "/home/jovyan/airflow/plugins","/home/jovyan/airflow/logs" ]
+          command:  ["/bin/bash","/dataflow/scripts/post-start.sh"]
+      preStop:
+        exec:
+          command: ["python", "/dataflow/scripts/prestop_hook.py"]
   prePuller:
-     hook:
+    hook:
       enabled: false
       pullOnlyOnChanges: true
       # image and the configuration below relates to the hook-image-awaiter Job
       image:
         name: quay.io/jupyterhub/k8s-image-awaiter
         tag: "3.1.0"
+    continuous:
+      enabled: false
   ingress:
     enabled: false
   cull:
     enabled: true
-    users: false # --cull-users
+    users: true # --cull-users
     adminUsers: true # --cull-admin-users
     removeNamedServers: false # --remove-named-servers
     timeout: 3600 # --timeout
@@ -152,3 +418,13 @@ jupyterhub:
 
   global:
     safeToShowValues: false
+  
+  scheduling:
+    userScheduler:
+      enabled: false
+    userPods: 
+      nodeAffinity:
+        matchNodePurpose: ignore
+    corePods:
+      nodeAffinity:
+        matchNodePurpose: ignore

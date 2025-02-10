@@ -1,0 +1,26 @@
+cloud_provider: 
+environment: "demo"
+
+ingress:
+  host: 
+  certificate: 
+  key: 
+
+uiConfig:
+  db_url: 
+  redis_url: 
+
+aws:
+  storageConfig:
+    efsId: 
+  userServiceAccount:
+    roleArn: 
+
+gcp:
+  fs-id: 
+
+jupyterhub:
+  singleuser:
+    storage:
+      dynamic:
+        storageClass: sc-jovyan
