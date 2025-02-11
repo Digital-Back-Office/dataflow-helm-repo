@@ -47,4 +47,18 @@ spec:
   resources:
     requests:
       storage: 1Ti
+{{- else if eq .Values.cloud_provider "local" }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: py-envs-pvc
+  annotations:
+    helm.sh/resource-policy: keep
+spec:
+  storageClassName: {{ .Values.jupyterhub.singleuser.storage.dynamic.storageClass }}
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 10Gi
 {{- end }}
