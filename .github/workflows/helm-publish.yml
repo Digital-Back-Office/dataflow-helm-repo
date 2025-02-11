@@ -5,11 +5,12 @@ on:
     inputs:
       chart_name:
         description: "Helm Chart Name"
-        default: "dataflow-studio"
+        default: "dataflow-studio-chart"
         required: true
         type: string
       chart_version:
         description: "Helm Chart Version"
+        default: "0.1.0"
         required: true
         type: string
 

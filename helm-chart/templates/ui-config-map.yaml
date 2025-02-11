@@ -15,9 +15,6 @@ data:
         host = 0.0.0.0
         port = 8000
 
-        [encryption]
-        fernet_key = 'GMrhvlHJgOk8xUVArFa8SgkNb9CUUME90aKxtpWYc0c='
-
         [static]
         static_files_dir=//dataflow/app/static
 

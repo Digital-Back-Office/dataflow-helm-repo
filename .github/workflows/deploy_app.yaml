@@ -1,0 +1,83 @@
+name: Workflow to deploy application 
+on:
+  workflow_dispatch:
+    inputs:
+      environment-NS:
+        description: 'Environment/Namespace to deploy: '
+        required: true
+        default: 'dataflow-studio'
+      action:
+        description: 'Action to perform: '
+        required: true
+        default: 'deploy'
+        type: choice
+        options:
+          - deploy
+          - rollback
+      revision:
+        description: 'Revision number to rollback to (default: last deployed version)'
+        required: false
+        default: ''
+permissions:
+  id-token: write
+  contents: read
+jobs:
+  helm_pipeline:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v3
+    - name: Configure AWS Credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        role-to-assume: arn:aws:iam::211125295301:role/ApplicationDeploymentRole
+        role-session-name: GitHub_to_AWS_via_FederatedOIDC
+        aws-region: us-east-1
+    - name: Sts GetCallerIdentity
+      run: |
+        aws sts get-caller-identity
+    - name: Authenticate with EKS
+      run: |
+        aws eks update-kubeconfig --region us-east-1 --name dataflow-demo
+    - name: Install Helm
+      run: |
+        curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+       
+    - name: Fetch Secrets from AWS Secrets Manager
+      if: github.event.inputs.action == 'deploy'
+      run: |
+        SECRETS=$(aws secretsmanager get-secret-value --secret-id helm-secrets-demo --query SecretString --output text)
+        echo "$SECRETS" > secrets.json
+    - name: Parse Secrets into Helm demo.yaml
+      if: github.event.inputs.action == 'deploy'
+      run: |
+        jq -r '.ingress_certificate' secrets.json > ingress_certificate
+        jq -r '.ingress_key' secrets.json > ingress_key   
+        jq -r '.uiConfig_db_url' secrets.json > uiConfig_db_url
+    - name: Deploy
+      if: github.event.inputs.action == 'deploy'
+      run: |
+        echo "Running Helm install: ${{ github.event.inputs.action }} on ${{ github.event.inputs.environment-NS }}..."
+        helm upgrade --install dataflow-studio ./helm-chart \
+          --namespace ${{ github.event.inputs.environment-NS }} \
+          --create-namespace \
+          -f ./common_resources/helm-chart/values.yaml \
+          --set ingress.certificate="$(cat ingress_certificate)" \
+          --set ingress.key="$(cat ingress_key)" \
+          --set uiConfig.db_url="$(cat uiConfig_db_url)" \
+          -f ./common_resources/helm-chart/environments/demo.yaml 
+    - name: Rollback Release
+      if: github.event.inputs.action == 'rollback'
+      run: |
+        echo "Rolling back Helm release: dataflow-studio on ${{ github.event.inputs.environment-NS }} to revision: ${{ github.event.inputs.revision }}..."
+        if [ -z "${{ github.event.inputs.revision }}" ]; then
+          helm rollback dataflow-studio -n ${{ github.event.inputs.environment-NS }} \
+            --namespace ${{ github.event.inputs.environment-NS }} 
+        else
+        if ! [[ "${{ github.event.inputs.revision }}" =~ ^[0-256]+$ ]]; then
+        echo "Error: Revision must be an integer!"
+        exit 1
+        fi
+          helm rollback dataflow-studio ${{ github.event.inputs.revision }} -n ${{ github.event.inputs.environment-NS }} \
+            --namespace ${{ github.event.inputs.environment-NS }} 
+        fi
