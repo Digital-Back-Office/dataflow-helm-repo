@@ -15,7 +15,7 @@ on:
           - deploy
           - rollback
       deploy-environment:
-        description: ' Select Environments :'
+        description: ' Select deploy environments (tf):'
         required: true
         default: 'demo'
         type: choice
