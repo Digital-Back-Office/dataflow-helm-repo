@@ -33,6 +33,7 @@ jobs:
         role-to-assume: arn:aws:iam::211125295301:role/ApplicationDeploymentRole
         role-session-name: GitHub_to_AWS_via_FederatedOIDC
         aws-region: us-east-1
+
     - name: Sts GetCallerIdentity
       run: |
         aws sts get-caller-identity
@@ -43,29 +44,26 @@ jobs:
       run: |
         curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
        
-    - name: Fetch Secrets from AWS Secrets Manager
+    - name: Install Terraform
+      run: |
+          curl -fsSL https://apt.releases.hashicorp.com/gpg | sudo apt-key add -
+          sudo apt-add-repository "deb [arch=amd64] https://apt.releases.hashicorp.com $(lsb_release -cs) main"
+          sudo apt-get update && sudo apt-get install terraform
+
+    - name: Fetch Terraform State from S3
       if: github.event.inputs.action == 'deploy'
       run: |
-        SECRETS=$(aws secretsmanager get-secret-value --secret-id helm-secrets-demo --query SecretString --output text)
-        echo "$SECRETS" > secrets.json
-    - name: Parse Secrets into Helm demo.yaml
+            aws s3 cp s3://dataflow-terraform-bucket/env:/demo/terraform.tfstate terraform.tfstate
+    
+    - name: Deploy using Terraform
       if: github.event.inputs.action == 'deploy'
       run: |
-        jq -r '.ingress_certificate' secrets.json > ingress_certificate
-        jq -r '.ingress_key' secrets.json > ingress_key   
-        jq -r '.uiConfig_db_url' secrets.json > uiConfig_db_url
-    - name: Deploy
-      if: github.event.inputs.action == 'deploy'
-      run: |
-        echo "Running Helm install: ${{ github.event.inputs.action }} on ${{ github.event.inputs.environment-NS }}..."
-        helm upgrade --install dataflow-studio ./helm-chart \
-          --namespace ${{ github.event.inputs.environment-NS }} \
-          --create-namespace \
-          -f ./common_resources/helm-chart/values.yaml \
-          --set ingress.certificate="$(cat ingress_certificate)" \
-          --set ingress.key="$(cat ingress_key)" \
-          --set uiConfig.db_url="$(cat uiConfig_db_url)" \
-          -f ./common_resources/helm-chart/environments/demo.yaml 
+          terraform init
+          terraform apply -target=module.helm.helm_release.dataflow-studio \
+            -var="helm_chart_path=./helm-chart" \
+            -var="namespace=${{ github.event.inputs.environment-NS }}" \
+            -auto-approve
+
     - name: Rollback Release
       if: github.event.inputs.action == 'rollback'
       run: |
