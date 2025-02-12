@@ -14,6 +14,16 @@ on:
         options:
           - deploy
           - rollback
+      deploy-environment:
+        description: ' Select Environments :'
+        required: true
+        default: 'demo'
+        type: choice
+        options: 
+          - demo 
+          - dev 
+          - uat 
+          - prod    
       revision:
         description: 'Revision number to rollback to (default: last deployed version)'
         required: false
@@ -50,16 +60,12 @@ jobs:
           sudo apt-add-repository "deb [arch=amd64] https://apt.releases.hashicorp.com $(lsb_release -cs) main"
           sudo apt-get update && sudo apt-get install terraform
 
-    - name: Fetch Terraform State from S3
-      if: github.event.inputs.action == 'deploy'
-      run: |
-            aws s3 cp s3://dataflow-terraform-bucket/env:/demo/terraform.tfstate terraform.tfstate
-    
     - name: Deploy using Terraform
       if: github.event.inputs.action == 'deploy'
       run: |
           terraform init
-          terraform apply -target=module.helm.helm_release.dataflow-studio \
+          terraform workspace select -or-create ${{ github.event.inputs.deploy-environment }}
+          terraform apply -target=module.helm.helm_release.dataflow-studio --var-file=demo.tfvars \
             -var="helm_chart_path=./helm-chart" \
             -var="namespace=${{ github.event.inputs.environment-NS }}" \
             -auto-approve
