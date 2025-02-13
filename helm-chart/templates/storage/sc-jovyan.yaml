@@ -25,19 +25,4 @@ allowVolumeExpansion: true
 parameters:
   type: pd-ssd 
   replication-type: none 
-{{- else if eq .Values.cloud_provider "local" }}
-apiVersion: storage.k8s.io/v1
-kind: StorageClass
-metadata:
-  name: sc-jovyan
-  annotations:
-    storageclass.kubernetes.io/is-default-class: "true"
-provisioner: {{ .Values.storageConfig.provisioner }}       
-reclaimPolicy: Retain
-volumeBindingMode: {{ .Values.storageConfig.volumeBindingMode }}
-allowVolumeExpansion: true
-parameters:
-  fsType: ext4
-  type: gp2
-  encrypted: "true"
 {{- end }}
