@@ -391,6 +391,10 @@ jupyterhub:
       preStop:
         exec:
           command: ["python", "/dataflow/scripts/prestop_hook.py"]
+    extraPodConfig:
+      restartPolicy: Always
+      shareProcessNamespace: true
+
   prePuller:
     hook:
       enabled: false
