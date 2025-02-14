@@ -1,0 +1,87 @@
+name: Workflow to deploy application 
+on:
+  workflow_dispatch:
+    inputs:
+      environment-NS:
+        description: 'Environment/Namespace to deploy: '
+        required: true
+        default: 'dataflow-studio'
+      action:
+        description: 'Action to perform: '
+        required: true
+        default: 'deploy'
+        type: choice
+        options:
+          - deploy
+          - rollback
+      deploy-environment:
+        description: ' Select deploy environments (tf):'
+        required: true
+        default: 'demo'
+        type: choice
+        options: 
+          - demo 
+          - dev 
+          - uat 
+          - prod    
+      revision:
+        description: 'Revision number to rollback to (default: last deployed version)'
+        required: false
+        default: ''
+permissions:
+  id-token: write
+  contents: read
+jobs:
+  helm_pipeline:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v3
+    - name: Configure AWS Credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        role-to-assume: arn:aws:iam::211125295301:role/ApplicationDeploymentRole
+        role-session-name: GitHub_to_AWS_via_FederatedOIDC
+        aws-region: us-east-1
+
+    - name: Sts GetCallerIdentity
+      run: |
+        aws sts get-caller-identity
+    - name: Authenticate with EKS
+      run: |
+        aws eks update-kubeconfig --region us-east-1 --name dataflow-demo
+    - name: Install Helm
+      run: |
+        curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+       
+    - name: Install Terraform
+      run: |
+          curl -fsSL https://apt.releases.hashicorp.com/gpg | sudo apt-key add -
+          sudo apt-add-repository "deb [arch=amd64] https://apt.releases.hashicorp.com $(lsb_release -cs) main"
+          sudo apt-get update && sudo apt-get install terraform
+
+    - name: Deploy using Terraform
+      if: github.event.inputs.action == 'deploy'
+      run: |
+          terraform init
+          terraform workspace select -or-create ${{ github.event.inputs.deploy-environment }}
+          terraform apply -target=module.helm.helm_release.dataflow-studio --var-file=demo.tfvars \
+            -var="helm_chart_path=./helm-chart" \
+            -var="namespace=${{ github.event.inputs.environment-NS }}" \
+            -auto-approve
+
+    - name: Rollback Release
+      if: github.event.inputs.action == 'rollback'
+      run: |
+        echo "Rolling back Helm release: dataflow-studio on ${{ github.event.inputs.environment-NS }} to revision: ${{ github.event.inputs.revision }}..."
+        if [ -z "${{ github.event.inputs.revision }}" ]; then
+          helm rollback dataflow-studio -n ${{ github.event.inputs.environment-NS }} \
+            --namespace ${{ github.event.inputs.environment-NS }} 
+        else
+        if ! [[ "${{ github.event.inputs.revision }}" =~ ^[0-256]+$ ]]; then
+        echo "Error: Revision must be an integer!"
+        exit 1
+        fi
+          helm rollback dataflow-studio ${{ github.event.inputs.revision }} -n ${{ github.event.inputs.environment-NS }} \
+            --namespace ${{ github.event.inputs.environment-NS }} 
+        fi

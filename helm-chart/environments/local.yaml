@@ -1,0 +1,35 @@
+cloud_provider: "local"
+environment: "local"
+ingress:
+  host: dev.dataflow.zone
+uiConfig:
+  db_url: #postgresql://{user}:{password}@{host}:5432/{dbname}
+storageConfig:
+  provisioner: k8s.io/minikube-hostpath # "docker.io/hostpath" for dev cluster in docker desktop
+  volumeBindingMode: Immediate
+
+userServiceAccount:
+  roleArn:
+
+jupyterhub:
+  singleuser:
+    extraEnv: 
+      AWS_ACCESS_KEY_ID:
+          valueFrom:
+            secretKeyRef:
+              name: aws-secrets
+              key: aws_access_key_id
+      AWS_SECRET_ACCESS_KEY:
+          valueFrom:
+            secretKeyRef:
+              name: aws-secrets
+              key: aws_secret_access_key
+      AWS_SESSION_TOKEN:
+          valueFrom:
+            secretKeyRef:
+              name: aws-secrets
+              key: aws_session_token
+              
+    storage:
+      dynamic:
+        storageClass: sc-jovyan

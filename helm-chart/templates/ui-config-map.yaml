@@ -11,6 +11,12 @@ data:
         max_overflow = 10
         
         [server]
-        reload = True
+        debug = True
         host = 0.0.0.0
         port = 8000
+
+        [static]
+        static_files_dir=//dataflow/app/static
+
+        [redis]
+        redis_url = {{ .Values.uiConfig.redis_url }}

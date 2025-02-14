@@ -1,0 +1,44 @@
+name: Publish Helm Chart to GitHub Packages
+
+on:
+  workflow_dispatch:
+    inputs:
+      chart_name:
+        description: "Helm Chart Name"
+        default: "dataflow-studio-chart"
+        required: true
+        type: string
+      chart_version:
+        description: "Helm Chart Version"
+        default: "0.1.0"
+        required: true
+        type: string
+
+jobs:
+  publish:
+    name: Publish Helm Chart
+    runs-on: ubuntu-latest
+
+    permissions:
+      packages: write
+      contents: read
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+      
+      - name: Install Helm
+        run: |
+          curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+
+      - name: Log in to GitHub Container Registry
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io --username ${{ github.actor }} --password-stdin
+
+      - name: Package Helm Chart
+        run: |
+          helm package helm-chart --destination ./chart-packages
+          echo "Packaged Helm Chart: ${{ inputs.chart_name }}, Version: ${{ inputs.chart_version }}"
+
+      - name: Push Helm Chart to GitHub Packages
+        run: |
+          helm push ./chart-packages/${{ inputs.chart_name }}-${{ inputs.chart_version }}.tgz oci://ghcr.io/${{ github.repository_owner }}/helm
