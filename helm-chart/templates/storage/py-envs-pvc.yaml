@@ -13,28 +13,6 @@ spec:
     requests:
       storage: 10Gi
 {{- else if eq .Values.cloud_provider "gcp" }}
-apiVersion: v1
-kind: PersistentVolume
-metadata:
-  name: py-envs-pv
-spec:
-  storageClassName: "enterprise-multishare-rwx"
-  capacity:
-    storage: 1Ti
-  accessModes:
-    - ReadWriteMany
-  persistentVolumeReclaimPolicy: Retain
-  volumeMode: Filesystem
-  csi:
-    driver: filestore.csi.storage.gke.io
-    volumeHandle: {{ .Values.csi.volumeHandle }}
-    volumeAttributes: 
-      ip: {{ .Values.csi.volumeAttributes.ip }}
-      volume: share1
-  claimRef:
-    name: py-envs-pvc 
-    namespace: {{ .Values.claimRef.namespace }}
----
 kind: PersistentVolumeClaim
 apiVersion: v1
 metadata:
